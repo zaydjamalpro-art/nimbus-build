@@ -11,7 +11,7 @@ on:
         default: Nimbus
       fedora_version:
         description: Fedora version to base on
-        default: "45"
+        default: "44"
 
 jobs:
   build:
