@@ -114,8 +114,12 @@ generic-logos-httpd
 %end
 
 # ---- Post-install configuration ---------------------------------------------
-%post --erroronfail
+# Its output goes to a log file, and the --nochroot step at the end checks
+# how it exited. That way a failure leaves its log in the build-logs
+# artifact instead of vanishing with the discarded disk image.
+%post --log=/root/nimbus-post.log
 set -euxo pipefail
+trap 'echo "$?" > /root/nimbus-post.status' EXIT
 
 # Build the Broadcom wl module now, against the image's kernel, so Wi-Fi works
 # the moment the live USB boots (otherwise akmods would compile it on first
@@ -577,4 +581,17 @@ sed -i \
 rm -f /var/lib/systemd/random-seed
 rm -f /etc/machine-id && touch /etc/machine-id
 dnf clean all
+%end
+
+# Copy the %post log out of the image (livemedia-creator saves /tmp/*log to
+# the build's anaconda/ log folder), then fail the build if %post failed.
+%post --nochroot --erroronfail
+cp "$ANA_INSTALL_PATH/root/nimbus-post.log" /tmp/nimbus-post.log || true
+rc="$(cat "$ANA_INSTALL_PATH/root/nimbus-post.status" 2>/dev/null || echo missing)"
+rm -f "$ANA_INSTALL_PATH/root/nimbus-post.log" "$ANA_INSTALL_PATH/root/nimbus-post.status"
+if [ "$rc" != 0 ]; then
+  echo "Nimbus %post failed (exit status $rc). Last lines of its log:"
+  tail -n 80 /tmp/nimbus-post.log || true
+  exit 1
+fi
 %end
