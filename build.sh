@@ -10,11 +10,12 @@
 #   REMIX_NAME      name shown in the boot menu and Settings > About
 #   FEDORA_VERSION  Fedora release to base on
 #
-#   REMIX_NAME="Nimbus" FEDORA_VERSION=45 ./build.sh
+#   REMIX_NAME="Nimbus" FEDORA_VERSION=44 ./build.sh
 set -euo pipefail
 
 REMIX_NAME="${REMIX_NAME:-Nimbus}"
-FEDORA_VERSION="${FEDORA_VERSION:-45}"
+# 44: Fedora 45's installer crashes partway through this build.
+FEDORA_VERSION="${FEDORA_VERSION:-44}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Where the ~20 GB of build files go. Point this at a real disk when building
 # from a live USB, e.g. WORK_DIR=/run/media/liveuser/BUILD
