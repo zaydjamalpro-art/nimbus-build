@@ -114,6 +114,16 @@ generic-logos-httpd
 %end
 
 # ---- Post-install configuration ---------------------------------------------
+# The installer doesn't give the new system the build machine's DNS settings,
+# so %post can't look up github.com and its downloads fail. Lend it the
+# build machine's resolv.conf; the last %post step puts the original back.
+%post --nochroot --erroronfail
+if [ -L "$ANA_INSTALL_PATH/etc/resolv.conf" ] || [ -e "$ANA_INSTALL_PATH/etc/resolv.conf" ]; then
+  mv "$ANA_INSTALL_PATH/etc/resolv.conf" "$ANA_INSTALL_PATH/etc/resolv.conf.nimbus-orig"
+fi
+cp -L /etc/resolv.conf "$ANA_INSTALL_PATH/etc/resolv.conf"
+%end
+
 # Its output goes to a log file, and the --nochroot step at the end checks
 # how it exited. That way a failure leaves its log in the build-logs
 # artifact instead of vanishing with the discarded disk image.
@@ -127,6 +137,8 @@ if [ -w /dev/kmsg ]; then
   BASH_XTRACEFD=19
   PS4='nimbus-post: + '
 fi
+# Everything below downloads from the internet; fail clearly if it can't.
+getent hosts github.com >/dev/null || { echo "No DNS/network in %post: can't reach github.com"; exit 1; }
 
 # Build the Broadcom wl module now, against the image's kernel, so Wi-Fi works
 # the moment the live USB boots (otherwise akmods would compile it on first
@@ -593,6 +605,11 @@ dnf clean all
 # Copy the %post log out of the image (livemedia-creator saves /tmp/*log to
 # the build's anaconda/ log folder), then fail the build if %post failed.
 %post --nochroot --erroronfail
+# Put back the new system's own resolv.conf (see the first %post step).
+rm -f "$ANA_INSTALL_PATH/etc/resolv.conf"
+if [ -L "$ANA_INSTALL_PATH/etc/resolv.conf.nimbus-orig" ] || [ -e "$ANA_INSTALL_PATH/etc/resolv.conf.nimbus-orig" ]; then
+  mv "$ANA_INSTALL_PATH/etc/resolv.conf.nimbus-orig" "$ANA_INSTALL_PATH/etc/resolv.conf"
+fi
 cp "$ANA_INSTALL_PATH/root/nimbus-post.log" /tmp/nimbus-post.log || true
 rc="$(cat "$ANA_INSTALL_PATH/root/nimbus-post.status" 2>/dev/null || echo missing)"
 rm -f "$ANA_INSTALL_PATH/root/nimbus-post.log" "$ANA_INSTALL_PATH/root/nimbus-post.status"
