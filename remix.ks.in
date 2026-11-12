@@ -259,10 +259,15 @@ fetch_commit() {  # fetch_commit <repo> <commit> <dir>
 fetch_commit WhiteSur-kde "$WHITESUR_KDE_COMMIT" "$SRC/kde"
 ( cd "$SRC/kde" && ./install.sh -c light -c dark )
 
-# GTK theme, so Firefox and other GTK apps match
+# GTK theme, so Firefox and other GTK apps match. Unpack the ready-made
+# Light and Dark themes from the repo's release/ folder: the theme's own
+# installer fails inside the build environment.
 git clone -q --depth 1 --branch "$WHITESUR_GTK_TAG" \
   https://github.com/vinceliuice/WhiteSur-gtk-theme "$SRC/gtk"
-( cd "$SRC/gtk" && ./install.sh -d /usr/share/themes -c light -c dark -o normal -m )
+for v in Light Dark; do
+  tar -xJf "$SRC/gtk/release/WhiteSur-$v.tar.xz" -C /usr/share/themes
+done
+test -d /usr/share/themes/WhiteSur-Dark
 
 git clone -q --depth 1 --branch "$WHITESUR_ICON_TAG" \
   https://github.com/vinceliuice/WhiteSur-icon-theme "$SRC/icons"
@@ -522,7 +527,9 @@ gtk-cursor-theme-name=WhiteSur-cursors
 gtk-font-name=Inter 10
 gtk-decoration-layout=close,minimize,maximize:
 EOF
-cp -r /usr/share/themes/WhiteSur-Light/gtk-4.0/. /etc/skel/.config/gtk-4.0/
+if [ -d /usr/share/themes/WhiteSur-Light/gtk-4.0 ]; then
+  cp -r /usr/share/themes/WhiteSur-Light/gtk-4.0/. /etc/skel/.config/gtk-4.0/
+fi
 
 # Trackpad, like macOS: tap to click and natural scrolling. Plasma keeps
 # trackpad settings per device, so set them on the first login through
@@ -575,7 +582,8 @@ enabled=1
 gpgcheck=1
 gpgkey=https://downloads.claude.ai/keys/claude-code.asc
 EOF
-dnf -y install claude-code
+# Only use Anthropic's repo here, so flaky mirrors of the others can't stop it.
+dnf -y --disablerepo='*' --enablerepo=claude-code install claude-code
 command -v claude
 
 # Claude chat: Anthropic's desktop app only supports Debian/Ubuntu on Linux
