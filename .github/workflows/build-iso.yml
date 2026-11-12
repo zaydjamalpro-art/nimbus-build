@@ -1,0 +1,53 @@
+# Builds the Nimbus ISO on GitHub's free x86_64 Linux machines, so you don't
+# need a Linux PC. Run it from the repo's Actions tab ("Run workflow").
+# The finished ISO appears under the run's "Artifacts" as a .zip.
+name: Build ISO
+
+on:
+  workflow_dispatch:
+    inputs:
+      remix_name:
+        description: OS name
+        default: Nimbus
+      fedora_version:
+        description: Fedora version to base on
+        default: "45"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      # The runner has ~14 GB free by default; the build needs ~20 GB.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune -af
+          df -h /
+
+      - name: Build ISO in a Fedora container
+        env:
+          REMIX_NAME: ${{ inputs.remix_name }}
+          FEDORA_VERSION: ${{ inputs.fedora_version }}
+        run: bash ./build.sh
+
+      - name: Upload ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: nimbus-iso
+          path: out/*.iso
+          compression-level: 0
+          retention-days: 14
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            lmc.log
+            *.log
+          if-no-files-found: ignore
