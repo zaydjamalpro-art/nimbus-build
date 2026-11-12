@@ -1,0 +1,551 @@
+# Kickstart template for a macOS-style Fedora KDE Plasma remix with Broadcom Wi-Fi,
+# tuned for the 13" MacBook Pro A1278 (2011/2012, MacBookPro8,1 / 9,2):
+#   Intel Core i5 (Sandy/Ivy Bridge), Intel HD 3000/4000 graphics,
+#   Broadcom BCM4331 Wi-Fi, 8 GB DDR3, SATA SSD, 64-bit Apple EFI.
+# build.sh replaces @FEDORA_VERSION@ and @REMIX_NAME@ before handing it to
+# livemedia-creator. Don't feed this file to the build directly.
+
+lang en_US.UTF-8
+keyboard us
+timezone UTC --utc
+selinux --enforcing
+firewall --enabled --service=mdns
+network --bootproto=dhcp --device=link --activate
+services --enabled=NetworkManager,ModemManager --disabled=sshd
+rootpw --lock
+bootloader --location=none
+zerombr
+clearpart --all
+part / --size=10240 --fstype=ext4
+shutdown
+
+# ---- Repositories -----------------------------------------------------------
+url --mirrorlist="https://mirrors.fedoraproject.org/mirrorlist?repo=fedora-@FEDORA_VERSION@&arch=x86_64"
+repo --name=updates --mirrorlist="https://mirrors.fedoraproject.org/mirrorlist?repo=updates-released-f@FEDORA_VERSION@&arch=x86_64"
+
+# RPM Fusion carries the Broadcom "wl" driver (broadcom-wl / akmod-wl).
+repo --name=rpmfusion-free --mirrorlist="https://mirrors.rpmfusion.org/mirrorlist?repo=free-fedora-@FEDORA_VERSION@&arch=x86_64"
+repo --name=rpmfusion-free-updates --mirrorlist="https://mirrors.rpmfusion.org/mirrorlist?repo=free-fedora-updates-released-@FEDORA_VERSION@&arch=x86_64"
+repo --name=rpmfusion-nonfree --mirrorlist="https://mirrors.rpmfusion.org/mirrorlist?repo=nonfree-fedora-@FEDORA_VERSION@&arch=x86_64"
+repo --name=rpmfusion-nonfree-updates --mirrorlist="https://mirrors.rpmfusion.org/mirrorlist?repo=nonfree-fedora-updates-released-@FEDORA_VERSION@&arch=x86_64"
+
+# ---- Packages ---------------------------------------------------------------
+%packages
+# The full Fedora KDE Plasma desktop: Plasma, Dolphin, Konsole, Kate,
+# Discover, System Settings, Firefox, etc.
+@^kde-desktop-environment
+
+# Live-image plumbing (boot from USB, "Install to Hard Drive")
+kernel
+kernel-modules
+kernel-modules-extra
+dracut-live
+livesys-scripts
+anaconda-live
+anaconda-install-env-deps
+anaconda-webui
+glibc-all-langpacks
+
+# Broadcom Wi-Fi
+#   broadcom-wl : proprietary "wl" driver for BCM4311/4312/4313/4321/4322/
+#                 43142/43224/43225/43227/43228/4331/4360/4352 and similar
+#   akmod-wl    : rebuilds the driver automatically after kernel updates
+#   kernel-devel: needed by akmod-wl to build against the installed kernel
+broadcom-wl
+akmod-wl
+kernel-devel
+# Firmware for the open-source drivers (brcmfmac/brcmsmac) used by newer chips
+linux-firmware
+# Keep RPM Fusion enabled on installed systems so driver updates keep coming
+rpmfusion-free-release
+rpmfusion-nonfree-release
+
+# ---- MacBook Pro A1278 hardware ----
+# Fan control. Without it the SMC runs the fan in a crude mode and the
+# machine runs hot. mbpfan drives it from the CPU temperature sensors.
+mbpfan
+# Intel thermal daemon: keeps the i5 out of hard thermal throttling.
+thermald
+# Hardware video decoding (H.264 in Firefox/Videos) on HD 3000/4000.
+# Fedora's default intel-media-driver only covers Broadwell and newer.
+libva-intel-driver
+libva-utils
+# Battery health / SMART for the SSD, from Settings and Disks
+smartmontools
+# Mac EFI boot support
+shim-x64
+grub2-efi-x64
+efibootmgr
+
+# ---- macOS Sonoma-style look ----
+# Kvantum renders the WhiteSur style for KDE/Qt apps.
+kvantum
+# Inter is the closest free font to Apple's San Francisco (which can't be
+# redistributed); JetBrains Mono for the terminal.
+rsms-inter-fonts
+jetbrains-mono-fonts-all
+# Build-time tools: fetch/compile the WhiteSur theme, render the wallpaper
+git-core
+sassc
+glib2-devel
+libxml2
+librsvg2-tools
+
+# Drop virtual-machine guest tools: they're useless on real hardware and
+# just use RAM and start-up time.
+-open-vm-tools-desktop
+-open-vm-tools
+-qemu-guest-agent
+-spice-vdagent
+-spice-webdavd
+-virtualbox-guest-additions
+-hyperv-daemons
+
+# Branding: Fedora's trademark rules forbid shipping its logos in a remix,
+# so swap them for the neutral "generic" logos. The look stays the same.
+-fedora-logos
+generic-logos
+generic-logos-httpd
+%end
+
+# ---- Post-install configuration ---------------------------------------------
+%post --erroronfail
+set -euxo pipefail
+
+# Build the Broadcom wl module now, against the image's kernel, so Wi-Fi works
+# the moment the live USB boots (otherwise akmods would compile it on first
+# boot, which takes several minutes with no network).
+KVER="$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' kernel | sort -V | tail -n1)"
+akmods --force --kernels "$KVER"
+depmod -a "$KVER"
+test -n "$(find /usr/lib/modules/"$KVER" -name 'wl.ko*' -print -quit)"
+
+# broadcom-wl ships a blacklist for b43/ssb/bcma/brcmsmac so they don't grab
+# the card before wl. Make sure it's present.
+test -f /usr/lib/modprobe.d/broadcom-wl-blacklist.conf || \
+  test -f /etc/modprobe.d/broadcom-wl-blacklist.conf
+
+# ---- MacBook Pro A1278 tuning ----
+
+# Fans: A1278 fan range is ~2000-6200 RPM. Start ramping at 55 C, full speed
+# at 80 C. Quieter than Apple's defaults at idle, cooler under load.
+cat > /etc/mbpfan.conf <<'EOF'
+[general]
+min_fan1_speed = 2000
+max_fan1_speed = 6200
+low_temp = 55
+high_temp = 65
+max_temp = 80
+polling_interval = 1
+EOF
+cat > /etc/modules-load.d/a1278.conf <<'EOF'
+# Sensors that mbpfan reads
+coretemp
+applesmc
+EOF
+systemctl enable mbpfan.service thermald.service
+
+# SSD: weekly TRIM keeps write speed up on old SATA SSDs.
+systemctl enable fstrim.timer
+
+# Memory (8 GB): Fedora already uses compressed RAM swap (zram). Prefer it
+# over dropping file cache, and keep dirty-page flushing small so the SSD
+# isn't hit with big write bursts.
+cat > /etc/sysctl.d/90-a1278.conf <<'EOF'
+vm.swappiness = 100
+vm.vfs_cache_pressure = 50
+vm.dirty_background_bytes = 16777216
+vm.dirty_bytes = 50331648
+EOF
+
+# Graphics: HD 3000/4000 VA-API driver name, so apps pick the right one.
+cat > /etc/environment.d/90-a1278-vaapi.conf <<'EOF'
+LIBVA_DRIVER_NAME=i965
+EOF
+
+# Mac keyboard: F1-F12 keep their printed media functions (brightness,
+# volume, keyboard backlight). Hold fn for F1-F12.
+cat > /etc/modprobe.d/hid_apple.conf <<'EOF'
+options hid_apple fnmode=1
+EOF
+
+# Wi-Fi: Wi-Fi power saving with the wl driver is a common cause of BCM4331
+# dropouts and lag. Turn it off (costs very little battery).
+mkdir -p /etc/NetworkManager/conf.d
+cat > /etc/NetworkManager/conf.d/90-a1278-wifi-powersave.conf <<'EOF'
+[connection]
+wifi.powersave = 2
+EOF
+
+# ---- macOS Sonoma-style look (KDE Plasma) ----
+# WhiteSur (GPL/MIT, by vinceliuice) is an open-source theme set in the style
+# of recent macOS: Plasma theme, window decorations, Kvantum app style, GTK
+# theme (for Firefox and other GTK apps), icons and cursors. Pinned to
+# checked versions so builds are reproducible. Apple's logo, wallpapers and
+# fonts are Apple's property and are removed or never used.
+WHITESUR_KDE_COMMIT=cf4df59ce91004f7ea39358b1b8ff917d5c329f7
+WHITESUR_GTK_TAG=2026-09-10
+WHITESUR_ICON_TAG=2026-09-10
+WHITESUR_CURSOR_COMMIT=e190baf618ed95ee217d2fd45589bd309b37672b
+
+getent hosts github.com >/dev/null || { echo "No network in %post: can't fetch WhiteSur"; exit 1; }
+SRC="$(mktemp -d)"
+fetch_commit() {  # fetch_commit <repo> <commit> <dir>
+  git init -q "$3"
+  ( cd "$3" && git fetch -q --depth 1 "https://github.com/vinceliuice/$1" "$2" && git checkout -q FETCH_HEAD )
+}
+
+# Plasma theme, colour schemes, window decorations, Kvantum style
+fetch_commit WhiteSur-kde "$WHITESUR_KDE_COMMIT" "$SRC/kde"
+( cd "$SRC/kde" && ./install.sh -c light -c dark )
+
+# GTK theme, so Firefox and other GTK apps match
+git clone -q --depth 1 --branch "$WHITESUR_GTK_TAG" \
+  https://github.com/vinceliuice/WhiteSur-gtk-theme "$SRC/gtk"
+( cd "$SRC/gtk" && ./install.sh -d /usr/share/themes -c light -c dark -o normal -m )
+
+git clone -q --depth 1 --branch "$WHITESUR_ICON_TAG" \
+  https://github.com/vinceliuice/WhiteSur-icon-theme "$SRC/icons"
+( cd "$SRC/icons" && ./install.sh -d /usr/share/icons )
+
+fetch_commit WhiteSur-cursors "$WHITESUR_CURSOR_COMMIT" "$SRC/cursors"
+rm -rf /usr/share/icons/WhiteSur-cursors
+cp -pr "$SRC/cursors/dist" /usr/share/icons/WhiteSur-cursors
+rm -rf "$SRC"
+
+test -f /usr/share/color-schemes/WhiteSur.colors
+test -f /usr/share/color-schemes/WhiteSurDark.colors
+test -d /usr/share/aurorae/themes/WhiteSur
+test -d /usr/share/plasma/desktoptheme/WhiteSur
+test -d /usr/share/Kvantum/WhiteSur
+test -d /usr/share/themes/WhiteSur-Light
+test -d /usr/share/icons/WhiteSur
+test -f /usr/share/icons/WhiteSur-cursors/index.theme
+
+# Remove Apple artwork the theme packs ship: its macOS-style wallpapers and
+# the Apple-logo "start-here" icons.
+rm -rf /usr/share/wallpapers/WhiteSur*
+find /usr/share/icons -path '/usr/share/icons/WhiteSur*' \
+  \( -name 'start-here.svg' -o -name 'start-here-symbolic.svg' \) -delete
+for d in /usr/share/icons/WhiteSur*/; do gtk-update-icon-cache -qf "$d" || true; done
+
+# Nimbus menu icon (top-left of the menu bar, where macOS has the Apple menu):
+# an original cloud.
+mkdir -p /usr/share/icons/hicolor/scalable/apps
+cat > /usr/share/icons/hicolor/scalable/apps/nimbus-menu.svg <<'EOF'
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs><linearGradient id="c" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#5ab0ff"/><stop offset="1" stop-color="#2f6fe0"/></linearGradient></defs>
+  <path d="M18 50h30a12 12 0 0 0 1.5-23.9A16 16 0 0 0 19 23.5 13.5 13.5 0 0 0 18 50z" fill="url(#c)"/>
+</svg>
+EOF
+gtk-update-icon-cache -qf /usr/share/icons/hicolor || true
+
+# Original Sonoma-style wallpaper (rolling hills), as a Plasma wallpaper
+# package: Plasma switches to the night version in dark mode automatically.
+WPS="$(mktemp -d)"
+cat > "$WPS/light.svg" <<'EOF'
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2560 1600" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7fb2e5"/><stop offset=".55" stop-color="#cfe0ef"/><stop offset="1" stop-color="#f4d9b8"/>
+    </linearGradient>
+    <linearGradient id="h1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9fbf8a"/><stop offset="1" stop-color="#6f9a62"/></linearGradient>
+    <linearGradient id="h2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6d9a5d"/><stop offset="1" stop-color="#457a45"/></linearGradient>
+    <linearGradient id="h3" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3f7240"/><stop offset="1" stop-color="#22502b"/></linearGradient>
+  </defs>
+  <rect width="2560" height="1600" fill="url(#sky)"/>
+  <path d="M0 980 C420 820 760 860 1120 930 S1900 820 2560 900 V1600 H0Z" fill="url(#h1)" opacity=".85"/>
+  <path d="M0 1120 C380 1000 820 1080 1280 1040 S2100 960 2560 1080 V1600 H0Z" fill="url(#h2)"/>
+  <path d="M0 1300 C520 1180 960 1260 1400 1230 S2200 1180 2560 1260 V1600 H0Z" fill="url(#h3)"/>
+</svg>
+EOF
+cat > "$WPS/dark.svg" <<'EOF'
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2560 1600" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b1530"/><stop offset=".6" stop-color="#23365e"/><stop offset="1" stop-color="#4a4a6e"/>
+    </linearGradient>
+    <linearGradient id="h1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2c4a4a"/><stop offset="1" stop-color="#1d3536"/></linearGradient>
+    <linearGradient id="h2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1c3533"/><stop offset="1" stop-color="#112423"/></linearGradient>
+    <linearGradient id="h3" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0f1f1e"/><stop offset="1" stop-color="#060e0e"/></linearGradient>
+  </defs>
+  <rect width="2560" height="1600" fill="url(#sky)"/>
+  <path d="M0 980 C420 820 760 860 1120 930 S1900 820 2560 900 V1600 H0Z" fill="url(#h1)" opacity=".9"/>
+  <path d="M0 1120 C380 1000 820 1080 1280 1040 S2100 960 2560 1080 V1600 H0Z" fill="url(#h2)"/>
+  <path d="M0 1300 C520 1180 960 1260 1400 1230 S2200 1180 2560 1260 V1600 H0Z" fill="url(#h3)"/>
+</svg>
+EOF
+WP=/usr/share/wallpapers/NimbusHills
+mkdir -p "$WP/contents/images" "$WP/contents/images_dark"
+rsvg-convert -w 2560 -h 1600 "$WPS/light.svg" -o "$WP/contents/images/2560x1600.png"
+rsvg-convert -w 2560 -h 1600 "$WPS/dark.svg"  -o "$WP/contents/images_dark/2560x1600.png"
+rm -rf "$WPS"
+cat > "$WP/metadata.json" <<'EOF'
+{
+  "KPlugin": {
+    "Id": "NimbusHills",
+    "Name": "Nimbus Hills",
+    "Authors": [{ "Name": "Nimbus" }],
+    "License": "CC-BY-SA-4.0"
+  }
+}
+EOF
+
+# Nimbus global theme: WhiteSur's look plus the Nimbus wallpaper, menu icon,
+# dock apps and a macOS-style layout (menu bar on top, dock at the bottom).
+LNF=/usr/share/plasma/look-and-feel/org.nimbus.desktop
+cp -r /usr/share/plasma/look-and-feel/com.github.vinceliuice.WhiteSur "$LNF"
+rm -rf "$LNF/contents/splash"   # its splash uses Apple-style artwork
+cat > "$LNF/metadata.json" <<'EOF'
+{
+  "KPackageStructure": "Plasma/LookAndFeel",
+  "KPlugin": {
+    "Authors": [{ "Name": "Nimbus" }],
+    "Category": "Global Themes (Plasma 6)",
+    "Description": "macOS-style layout built on WhiteSur",
+    "Id": "org.nimbus.desktop",
+    "License": "GPLv3",
+    "Name": "Nimbus"
+  },
+  "X-KDE-fallbackPackage": "org.kde.breeze.desktop",
+  "X-Plasma-MainScript": "defaults",
+  "X-Plasma-APIVersion": "2"
+}
+EOF
+cat > "$LNF/contents/defaults" <<'EOF'
+[kcminputrc][Mouse]
+cursorTheme=WhiteSur-cursors
+
+[kdeglobals][General]
+ColorScheme=WhiteSur
+
+[kdeglobals][Icons]
+Theme=WhiteSur
+
+[kdeglobals][KDE]
+widgetStyle=kvantum
+
+[kwinrc][org.kde.kdecoration2]
+ButtonsOnLeft=XIA
+ButtonsOnRight=
+library=org.kde.kwin.aurorae
+theme=__aurorae__svg__WhiteSur
+
+[plasmarc][Theme]
+name=WhiteSur
+
+[Wallpaper]
+Image=NimbusHills
+EOF
+cat > "$LNF/contents/layouts/org.kde.plasma.desktop-layout.js" <<'EOF'
+// Nimbus: macOS-style layout.
+// Wallpaper
+for (const d of desktopsForActivity(currentActivity())) {
+  d.wallpaperPlugin = "org.kde.image";
+  d.currentConfigGroup = ["Wallpaper", "org.kde.image", "General"];
+  d.writeConfig("Image", "file:///usr/share/wallpapers/NimbusHills/");
+}
+
+// Menu bar: Nimbus menu, the active app's menus, then tray and clock.
+const bar = new Panel;
+bar.location = "top";
+bar.height = 2 * Math.floor(gridUnit * 1.6 / 2);
+bar.floating = false;
+
+const menu = bar.addWidget("org.kde.plasma.kickoff");
+menu.currentConfigGroup = ["General"];
+menu.writeConfig("icon", "nimbus-menu");
+menu.currentConfigGroup = ["Shortcuts"];
+menu.writeConfig("global", "Alt+F1");
+
+bar.addWidget("org.kde.plasma.appmenu");
+bar.addWidget("org.kde.plasma.panelspacer");
+bar.addWidget("org.kde.plasma.systemtray");
+const clock = bar.addWidget("org.kde.plasma.digitalclock");
+clock.currentConfigGroup = ["Appearance"];
+clock.writeConfig("showDate", true);
+clock.writeConfig("dateDisplayFormat", 1)  // beside the time;
+clock.writeConfig("dateFormat", "custom");
+clock.writeConfig("customDateFormat", "ddd MMM d");
+
+// Dock: centred, floating, hides when a window touches it.
+const dock = new Panel;
+dock.location = "bottom";
+dock.alignment = "center";
+dock.lengthMode = "fit";
+dock.hiding = "dodgewindows";
+dock.floating = true;
+dock.height = 64;
+
+const tasks = dock.addWidget("org.kde.plasma.icontasks");
+tasks.currentConfigGroup = ["General"];
+tasks.writeConfig("launchers", [
+  "preferred://filemanager",
+  "preferred://browser",
+  "applications:claude.desktop",
+  "applications:org.kde.konsole.desktop",
+  "applications:org.kde.kate.desktop",
+  "applications:org.kde.discover.desktop",
+  "applications:systemsettings.desktop",
+]);
+dock.addWidget("org.kde.plasma.marginsseparator");
+dock.addWidget("org.kde.plasma.trash");
+EOF
+
+# Make Nimbus the default for every user, both via Plasma's own default and
+# via the system-wide config files (belt and braces).
+mkdir -p /etc/xdg
+for f in /usr/share/kde-settings/kde-profile/default/xdg/kdeglobals; do
+  [ -f "$f" ] && sed -i 's/^LookAndFeelPackage=.*/LookAndFeelPackage=org.nimbus.desktop/' "$f"
+done
+cat > /etc/xdg/kdeglobals <<'EOF'
+[KDE]
+LookAndFeelPackage=org.nimbus.desktop
+widgetStyle=kvantum
+
+[General]
+ColorScheme=WhiteSur
+font=Inter,10,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
+menuFont=Inter,10,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
+toolBarFont=Inter,10,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
+smallestReadableFont=Inter,8,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
+fixed=JetBrains Mono,10,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
+
+[WM]
+activeFont=Inter,10,-1,5,600,0,0,0,0,0,0,0,0,0,0,1
+
+[Icons]
+Theme=WhiteSur
+EOF
+cat > /etc/xdg/kwinrc <<'EOF'
+[org.kde.kdecoration2]
+library=org.kde.kwin.aurorae
+theme=__aurorae__svg__WhiteSur
+ButtonsOnLeft=XIA
+ButtonsOnRight=
+
+[Windows]
+Placement=Centered
+EOF
+cat > /etc/xdg/kcminputrc <<'EOF'
+[Mouse]
+cursorTheme=WhiteSur-cursors
+EOF
+cat > /etc/xdg/plasmarc <<'EOF'
+[Theme]
+name=WhiteSur
+EOF
+cat > /etc/xdg/kscreenlockerrc <<'EOF'
+[Greeter][Wallpaper][org.kde.image][General]
+Image=file:///usr/share/wallpapers/NimbusHills/
+EOF
+# No splash screen: the desktop appears sooner on the old CPU
+cat > /etc/xdg/ksplashrc <<'EOF'
+[KSplash]
+Engine=none
+Theme=None
+EOF
+
+# Per-user defaults for new accounts (and the live user)
+mkdir -p /etc/skel/.config/Kvantum /etc/skel/.config/gtk-3.0 /etc/skel/.config/gtk-4.0
+cat > /etc/skel/.config/Kvantum/kvantum.kvconfig <<'EOF'
+[General]
+theme=WhiteSur
+EOF
+cat > /etc/skel/.config/gtk-3.0/settings.ini <<'EOF'
+[Settings]
+gtk-theme-name=WhiteSur-Light
+gtk-icon-theme-name=WhiteSur
+gtk-cursor-theme-name=WhiteSur-cursors
+gtk-font-name=Inter 10
+gtk-decoration-layout=close,minimize,maximize:
+EOF
+cp -r /usr/share/themes/WhiteSur-Light/gtk-4.0/. /etc/skel/.config/gtk-4.0/
+
+# Trackpad, like macOS: tap to click and natural scrolling. Plasma keeps
+# trackpad settings per device, so set them on the first login through
+# KWin, then leave them alone so users can change them in System Settings.
+cat > /usr/libexec/nimbus-trackpad-defaults <<'EOF'
+#!/bin/bash
+marker="${XDG_CONFIG_HOME:-$HOME/.config}/nimbus-trackpad-done"
+[ -e "$marker" ] && exit 0
+sleep 3
+devs=$(busctl --user get-property org.kde.KWin /org/kde/KWin/InputDeviceManager \
+         org.kde.KWin.InputDeviceManager devicesSysNames 2>/dev/null) || exit 0
+for dev in $(echo "$devs" | cut -d' ' -f3- | tr -d '"'); do
+  obj="/org/kde/KWin/InputDevice/$dev"
+  is_tp=$(busctl --user get-property org.kde.KWin "$obj" org.kde.KWin.InputDevice touchpad 2>/dev/null)
+  [ "$is_tp" = "b true" ] || continue
+  busctl --user set-property org.kde.KWin "$obj" org.kde.KWin.InputDevice tapToClick b true
+  busctl --user set-property org.kde.KWin "$obj" org.kde.KWin.InputDevice naturalScroll b true
+done
+touch "$marker"
+EOF
+chmod 755 /usr/libexec/nimbus-trackpad-defaults
+cat > /etc/xdg/autostart/nimbus-trackpad-defaults.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Nimbus trackpad defaults
+Exec=/usr/libexec/nimbus-trackpad-defaults
+OnlyShowIn=KDE;
+NoDisplay=true
+X-KDE-autostart-phase=2
+EOF
+
+# ---- Claude ----
+# Claude Code (the `claude` command in Terminal) from Anthropic's official
+# RPM repository. The repo stays enabled, so `sudo dnf upgrade` (or
+# Discover) keeps it up to date. Only install the key if its fingerprint
+# matches the one published in Anthropic's docs.
+CLAUDE_KEY_FPR=31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE
+KEYTMP="$(mktemp)"
+curl -fsSL https://downloads.claude.ai/keys/claude-code.asc -o "$KEYTMP"
+gpg --show-keys --with-colons "$KEYTMP" | grep -q "^fpr:::::::::$CLAUDE_KEY_FPR:" \
+  || { echo "Claude Code signing key fingerprint mismatch"; exit 1; }
+rpm --import "$KEYTMP"
+rm -f "$KEYTMP"
+cat > /etc/yum.repos.d/claude-code.repo <<'EOF'
+[claude-code]
+name=Claude Code
+baseurl=https://downloads.claude.ai/claude-code/rpm/stable
+enabled=1
+gpgcheck=1
+gpgkey=https://downloads.claude.ai/keys/claude-code.asc
+EOF
+dnf -y install claude-code
+command -v claude
+
+# Claude chat: Anthropic's desktop app only supports Debian/Ubuntu on Linux
+# so far, so add a Claude app that opens claude.ai in its own Firefox window.
+cat > /usr/share/applications/claude.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Claude
+Comment=Chat with Claude
+Exec=firefox --new-window https://claude.ai
+Icon=internet-chat
+Categories=Network;Office;
+Keywords=AI;assistant;chat;claude;
+StartupNotify=true
+EOF
+
+# Build-only tools aren't needed on the finished system
+dnf -y remove sassc glib2-devel librsvg2-tools || true
+
+# Live session: log straight into Plasma as the "liveuser" account.
+sed -i 's/^livesys_session=.*/livesys_session="kde"/' /etc/sysconfig/livesys
+systemctl enable livesys.service livesys-late.service
+
+# Name the system. os-release is what System Settings > About and the boot
+# menu show.
+sed -i \
+  -e 's/^NAME=.*/NAME="@REMIX_NAME@"/' \
+  -e 's/^PRETTY_NAME=.*/PRETTY_NAME="@REMIX_NAME@ @FEDORA_VERSION@ (Fedora Remix)"/' \
+  /usr/lib/os-release
+
+# Image hygiene
+rm -f /var/lib/systemd/random-seed
+rm -f /etc/machine-id && touch /etc/machine-id
+dnf clean all
+%end
