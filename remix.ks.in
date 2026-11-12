@@ -16,7 +16,9 @@ rootpw --lock
 bootloader --location=none
 zerombr
 clearpart --all
-part / --size=10240 --fstype=ext4
+# 20 GB: the installer also stores the downloaded packages here while it
+# works, and the full KDE desktop doesn't fit in 10 GB.
+part / --size=20480 --fstype=ext4
 shutdown
 
 # ---- Repositories -----------------------------------------------------------
@@ -63,7 +65,10 @@ rpmfusion-nonfree-release
 # ---- MacBook Pro A1278 hardware ----
 # Fan control. Without it the SMC runs the fan in a crude mode and the
 # machine runs hot. mbpfan drives it from the CPU temperature sensors.
-mbpfan
+# It isn't in Fedora's repositories, so %post compiles it from source
+# (gcc and make are needed for that, and by akmod-wl anyway).
+gcc
+make
 # Intel thermal daemon: keeps the i5 out of hard thermal throttling.
 thermald
 # Hardware video decoding (H.264 in Firefox/Videos) on HD 3000/4000.
@@ -126,6 +131,30 @@ test -f /usr/lib/modprobe.d/broadcom-wl-blacklist.conf || \
   test -f /etc/modprobe.d/broadcom-wl-blacklist.conf
 
 # ---- MacBook Pro A1278 tuning ----
+
+# mbpfan isn't packaged in Fedora, so build it from the official source,
+# pinned to release v2.4.0 (commit a9c324d).
+MBPFAN_COMMIT=a9c324db67470a222b20d8ddaa9b4e1e488e9771
+MBPSRC="$(mktemp -d)"
+git init -q "$MBPSRC"
+( cd "$MBPSRC" && git fetch -q --depth 1 https://github.com/linux-on-mac/mbpfan "$MBPFAN_COMMIT" \
+    && git checkout -q FETCH_HEAD && make bin/mbpfan )
+install -m755 "$MBPSRC/bin/mbpfan" /usr/sbin/mbpfan
+install -m644 "$MBPSRC/mbpfan.8.gz" /usr/share/man/man8/mbpfan.8.gz
+rm -rf "$MBPSRC"
+cat > /etc/systemd/system/mbpfan.service <<'EOF'
+[Unit]
+Description=MacBook fan control daemon (mbpfan)
+After=systemd-modules-load.service
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/mbpfan -f
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
 
 # Fans: A1278 fan range is ~2000-6200 RPM. Start ramping at 55 C, full speed
 # at 80 C. Quieter than Apple's defaults at idle, cooler under load.
