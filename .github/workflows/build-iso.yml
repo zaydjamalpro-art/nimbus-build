@@ -50,4 +50,5 @@ jobs:
           path: |
             lmc.log
             *.log
+            anaconda/
           if-no-files-found: ignore
