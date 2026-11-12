@@ -84,6 +84,12 @@ smartmontools
 shim-x64
 grub2-efi-x64
 efibootmgr
+# Boot files the ISO-making step copies onto the USB image:
+#   grub2-efi-x64-cdboot : gcdx64.efi, which makes the USB stick boot on EFI
+#                          machines such as the MacBook (hold Option at power-on)
+#   grub2-pc-modules     : BIOS boot files (i386-pc), also required by the step
+grub2-efi-x64-cdboot
+grub2-pc-modules
 
 # ---- macOS Sonoma-style look ----
 # Kvantum renders the WhiteSur style for KDE/Qt apps.
