@@ -246,6 +246,9 @@ WHITESUR_ICON_TAG=2026-09-10
 WHITESUR_CURSOR_COMMIT=e190baf618ed95ee217d2fd45589bd309b37672b
 
 getent hosts github.com >/dev/null || { echo "No network in %post: can't fetch WhiteSur"; exit 1; }
+# The WhiteSur installers look up the current user from $USER, which isn't
+# set during the build, and stop with exit status 2 when it's empty.
+export USER=root HOME=/root
 SRC="$(mktemp -d)"
 fetch_commit() {  # fetch_commit <repo> <commit> <dir>
   git init -q "$3"
