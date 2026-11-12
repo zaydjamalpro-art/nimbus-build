@@ -34,6 +34,11 @@ jobs:
           FEDORA_VERSION: ${{ inputs.fedora_version }}
         run: bash ./build.sh
 
+      # The build runs as root, so let the upload steps read its files.
+      - name: Make build output readable
+        if: always()
+        run: sudo chmod -R a+rX out anaconda *.log 2>/dev/null || true
+
       - name: Upload ISO
         uses: actions/upload-artifact@v4
         with:
