@@ -214,12 +214,14 @@ vm.dirty_bytes = 50331648
 EOF
 
 # Graphics: HD 3000/4000 VA-API driver name, so apps pick the right one.
+mkdir -p /etc/environment.d
 cat > /etc/environment.d/90-a1278-vaapi.conf <<'EOF'
 LIBVA_DRIVER_NAME=i965
 EOF
 
 # Mac keyboard: F1-F12 keep their printed media functions (brightness,
 # volume, keyboard backlight). Hold fn for F1-F12.
+mkdir -p /etc/modprobe.d
 cat > /etc/modprobe.d/hid_apple.conf <<'EOF'
 options hid_apple fnmode=1
 EOF
@@ -393,6 +395,7 @@ name=WhiteSur
 [Wallpaper]
 Image=NimbusHills
 EOF
+mkdir -p "$LNF/contents/layouts"
 cat > "$LNF/contents/layouts/org.kde.plasma.desktop-layout.js" <<'EOF'
 // Nimbus: macOS-style layout.
 // Wallpaper
@@ -538,6 +541,7 @@ done
 touch "$marker"
 EOF
 chmod 755 /usr/libexec/nimbus-trackpad-defaults
+mkdir -p /etc/xdg/autostart
 cat > /etc/xdg/autostart/nimbus-trackpad-defaults.desktop <<'EOF'
 [Desktop Entry]
 Type=Application
