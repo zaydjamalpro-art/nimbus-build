@@ -26,10 +26,13 @@ url --mirrorlist="https://mirrors.fedoraproject.org/mirrorlist?repo=fedora-@FEDO
 repo --name=updates --mirrorlist="https://mirrors.fedoraproject.org/mirrorlist?repo=updates-released-f@FEDORA_VERSION@&arch=x86_64"
 
 # RPM Fusion carries the Broadcom "wl" driver (broadcom-wl / akmod-wl).
-repo --name=rpmfusion-free --mirrorlist="https://mirrors.rpmfusion.org/mirrorlist?repo=free-fedora-@FEDORA_VERSION@&arch=x86_64"
-repo --name=rpmfusion-free-updates --mirrorlist="https://mirrors.rpmfusion.org/mirrorlist?repo=free-fedora-updates-released-@FEDORA_VERSION@&arch=x86_64"
-repo --name=rpmfusion-nonfree --mirrorlist="https://mirrors.rpmfusion.org/mirrorlist?repo=nonfree-fedora-@FEDORA_VERSION@&arch=x86_64"
-repo --name=rpmfusion-nonfree-updates --mirrorlist="https://mirrors.rpmfusion.org/mirrorlist?repo=nonfree-fedora-updates-released-@FEDORA_VERSION@&arch=x86_64"
+# The build uses RPM Fusion's main server: its mirrors are often out of sync
+# and stop the build. Installed systems still use the mirrors (via the
+# rpmfusion-*-release packages below).
+repo --name=rpmfusion-free --baseurl="https://download1.rpmfusion.org/free/fedora/releases/@FEDORA_VERSION@/Everything/x86_64/os/"
+repo --name=rpmfusion-free-updates --baseurl="https://download1.rpmfusion.org/free/fedora/updates/@FEDORA_VERSION@/x86_64/"
+repo --name=rpmfusion-nonfree --baseurl="https://download1.rpmfusion.org/nonfree/fedora/releases/@FEDORA_VERSION@/Everything/x86_64/os/"
+repo --name=rpmfusion-nonfree-updates --baseurl="https://download1.rpmfusion.org/nonfree/fedora/updates/@FEDORA_VERSION@/x86_64/"
 
 # ---- Packages ---------------------------------------------------------------
 %packages
