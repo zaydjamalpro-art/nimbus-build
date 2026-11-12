@@ -612,6 +612,9 @@ dnf -y remove sassc glib2-devel librsvg2-tools || true
 # Live session: log straight into Plasma as the "liveuser" account.
 sed -i 's/^livesys_session=.*/livesys_session="kde"/' /etc/sysconfig/livesys
 systemctl enable livesys.service livesys-late.service
+# Start the desktop at boot. The installer otherwise picks text mode
+# (multi-user.target) for image builds, and installed systems inherit it.
+systemctl set-default graphical.target
 
 # Name the system. os-release is what System Settings > About and the boot
 # menu show.
