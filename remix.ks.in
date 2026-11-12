@@ -120,6 +120,13 @@ generic-logos-httpd
 %post --log=/root/nimbus-post.log
 set -euxo pipefail
 trap 'echo "$?" > /root/nimbus-post.status' EXIT
+# Also send the trace of each command to the kernel log. Unlike the files in
+# the image, it survives an installer crash; the workflow prints it.
+if [ -w /dev/kmsg ]; then
+  exec 19>/dev/kmsg
+  BASH_XTRACEFD=19
+  PS4='nimbus-post: + '
+fi
 
 # Build the Broadcom wl module now, against the image's kernel, so Wi-Fi works
 # the moment the live USB boots (otherwise akmods would compile it on first
