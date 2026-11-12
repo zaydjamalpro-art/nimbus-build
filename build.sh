@@ -78,21 +78,36 @@ if command -v getenforce >/dev/null && [[ "$(getenforce)" == Enforcing ]]; then
 fi
 trap '[[ $restore_selinux == 1 ]] && $SUDO setenforce 1 || true' EXIT
 
-$SUDO rm -rf "$OUT"
 $SUDO mkdir -p "$WORK_DIR/tmp"
 echo ">> Building ISO (20-60 min, downloads ~3 GB)"
-$SUDO livemedia-creator \
-  --ks "$HERE/remix-flat.ks" \
-  --no-virt \
-  --make-iso \
-  --iso-only \
-  --iso-name "$ISO_NAME" \
-  --project "$REMIX_NAME" \
-  --releasever "$FEDORA_VERSION" \
-  --volid "$VOLID" \
-  --resultdir "$OUT" \
-  --tmp "$WORK_DIR/tmp" \
-  --logfile "$WORK_DIR/lmc.log"
+# Package mirrors sometimes fail to answer, which stops the installer with
+# "Error setting up repositories". Retry that case up to 3 times.
+attempt=1
+while :; do
+  $SUDO rm -rf "$OUT"
+  $SUDO rm -f "$WORK_DIR/lmc.log"
+  if $SUDO livemedia-creator \
+      --ks "$HERE/remix-flat.ks" \
+      --no-virt \
+      --make-iso \
+      --iso-only \
+      --iso-name "$ISO_NAME" \
+      --project "$REMIX_NAME" \
+      --releasever "$FEDORA_VERSION" \
+      --volid "$VOLID" \
+      --resultdir "$OUT" \
+      --tmp "$WORK_DIR/tmp" \
+      --logfile "$WORK_DIR/lmc.log"; then
+    break
+  fi
+  if (( attempt < 3 )) && grep -q "Error setting up repositories" "$WORK_DIR/lmc.log"; then
+    echo ">> Package mirrors didn't respond (attempt $attempt of 3). Retrying in 60 s."
+    attempt=$((attempt + 1))
+    sleep 60
+    continue
+  fi
+  die "the ISO build failed. Logs: $WORK_DIR/lmc.log and $WORK_DIR/anaconda/"
+done
 
 echo
 echo ">> Done: $OUT/$ISO_NAME"
